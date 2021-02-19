@@ -1,4 +1,4 @@
-# @package _group_
+# feature extractor
 run: 2
 model_name: 'embedding_unet'
 backbone:
@@ -9,19 +9,19 @@ backbone:
   # in intensity distribution between images with large and small cells
   layer_order: gcr
   num_groups: 8
-  f_maps: [32, 64, 128]
+  f_maps: [32, 64, 128, 256]
   #conv_padding: 0
   final_sigmoid: false
   is_segmentation: false
 load_pretrained: false
-lr: 1e-4
+lr: 1e-3
 
 trainer:
-  n_iterations: 1500  # number of total iterations
-  batch_size: 4  # batch size for feature extractor warmup
+  n_iterations: 20000  # number of total iterations
+  batch_size: 1  # batch size for feature extractor warmup
 
-  patch_shape: [100, 100]
+  patch_shape: [500, 500]
   patch_stride: [128, 128]
   reorder_sp: true
-  patch_manager: none # rotated, no_cross, none
+  patch_manager: no_cross # rotated, no_cross, none
 

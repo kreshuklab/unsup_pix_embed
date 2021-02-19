@@ -1,0 +1,37 @@
+# feature extractor
+fe:
+  model_name: 'embedding_unet'
+  backbone: Unet  # Unet resnet
+  load_pretrained: false
+  lr: 1e-4
+  betas: [0.9, 0.999]
+  n_embedding_features: 16  # number of embedding feature channels
+  n_raw_channels: 3 #5 3  # number of channels in current state
+  alpha: 1  # loss weight info_nce term
+  beta: 1  # loss weight prot_info_nce term
+  lbd: 0.3  # max entropy (should be strictly smaller than .5)
+  gamma: 0.5  #  loss weight of entropy regularization. Encouraging entropy in the cluster center distribution
+  tau: 1  # entropy in info_nce loss
+  num_neg: 500  # number of negative samples in info_nce and prot_info_nce
+  subs_size: 15000
+
+  trainer:
+    method: info_nce
+    whitened_embeddings: false
+    momentum_tau: 0.1
+    momentum: 1
+    identical_initialization: True
+    n_iterations: 8800  # number of total iterations
+    n_k_stop_it: 1000  # iteration at which k has final value
+    psi_start: 0.9  # psi is balance between loss terms psi * infoNce + (1-psi) (prot+entrpy)
+    psi_stop: 0.3  # psi is reduced until n_k_stop_it to this final value
+    k_start: 600  # number of clusters of the momentum networks predictions to start with
+    k_stop: 20  # number of final clusters
+    n_warmup_it: 2  # number of warmup iterations where only info_nce + regularization is applied
+    batch_size: 1  # batch size for feature extractor warmup
+
+    patch_shape: [180, 180]
+    patch_stride: [16, 16]
+    reorder_sp: false
+    patch_manager: no_cross # rotated, no_cross, none
+

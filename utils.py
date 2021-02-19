@@ -7,6 +7,20 @@ import random
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from scipy.cluster.vq import kmeans2, whiten, kmeans
+import elf.segmentation.features as feats
+
+def get_valid_edges(shape, offsets):
+    # compute valid edges
+    ndim = len(offsets[0])
+    image_shape = shape[1:]
+    valid_edges = np.ones(shape, dtype=bool)
+    for i, offset in enumerate(offsets):
+        for j, o in enumerate(offset):
+            inv_slice = slice(0, -o) if o < 0 else slice(image_shape[j] - o, image_shape[j])
+            invalid_slice = (i, ) + tuple(slice(None) if j != d else inv_slice
+                                          for d in range(ndim))
+            valid_edges[invalid_slice] = 0
+    return valid_edges
 
 # Adjusts learning rate
 def adjust_learning_rate(optimizer, lr):
@@ -79,9 +93,29 @@ def squeeze_repr(nodes, edges, seg):
     indices = torch.where(seg.unsqueeze(0) == nodes.unsqueeze(-1).unsqueeze(-1))
     seg[indices[1], indices[2]] = _nodes[indices[0]].float().type(seg.dtype)
 
+    return nodes, edges, seg
+
 def set_seed_everywhere(seed):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+def get_naive_affinities(raw, offsets):
+    """get naive pixel affinities based on differences in pixel intensities."""
+    affinities = []
+    for i, off in enumerate(offsets):
+        rolled = torch.roll(raw, tuple(-np.array(off)), (-2, -1))
+        dist = torch.norm(raw - rolled, dim=0)
+        affinities.append(dist / dist.max())
+    return torch.stack(affinities)
+
+def get_edge_features_1d(sp_seg, offsets, affinities):
+    offsets_3d = []
+    for off in offsets:
+        offsets_3d.append([0] + off)
+
+    rag = feats.compute_rag(np.expand_dims(sp_seg, axis=0))
+    edge_feat = feats.compute_affinity_features(rag, np.expand_dims(affinities, axis=1), offsets_3d)[:, :]
+    return edge_feat, rag.uvIds()

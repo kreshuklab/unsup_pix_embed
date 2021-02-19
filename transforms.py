@@ -1,25 +1,25 @@
 import torch
+import PIL
 from torchvision import transforms
 
 class RndAugmentationTfs():
     """ returns two random sets of image augmentation transforms.
     The first contains n_spat spatial image tfs and the second one n_int intensity based tfs.
     """
-    def __init__(self, img_size):
+    def __init__(self, img_size, n_chnl_for_intensity=3):
         self.spat_tfs = [
             transforms.RandomAffine(180),
-            transforms.RandomResizedCrop(tuple(img_size)),
+            transforms.RandomCrop(tuple(img_size)),
             transforms.RandomHorizontalFlip(p=1.),
-            transforms.RandomPerspective(distortion_scale=0.5, p=0.5, interpolation=2, fill=0),
-            transforms.RandomRotation(180),
+            transforms.RandomPerspective(distortion_scale=0.5, p=1., interpolation=PIL.Image.NEAREST, fill=0),
+            transforms.RandomRotation(180, resample=PIL.Image.NEAREST),
             transforms.RandomVerticalFlip(p=1.)
         ]
 
-        self.int_tfs = [
-            transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=.5),
-            transforms.RandomGrayscale(p=0.5),
-            transforms.GaussianBlur(kernel_size=5)
-        ]
+        self.int_tfs = [transforms.GaussianBlur(kernel_size=5)]
+        if n_chnl_for_intensity == 3:
+            self.int_tfs += [transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=.5),
+                            transforms.RandomGrayscale(p=0.5)]
     def sample(self, n_spat, n_int):
         spat_inds = torch.multinomial(torch.ones(len(self.spat_tfs)), n_spat)
         int_inds = torch.multinomial(torch.ones(len(self.int_tfs)), n_int)

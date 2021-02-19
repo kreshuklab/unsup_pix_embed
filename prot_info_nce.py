@@ -11,8 +11,9 @@ from utils import soft_update_params, pca_project, get_angles, set_seed_everywhe
 import matplotlib.pyplot as plt
 from transforms import RndAugmentationTfs, add_sp_gauss_noise
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from ProtInfoNce_loss import EntrInfoNCE
+from losses.ProtInfoNce_loss import EntrInfoNCE
 from tensorboardX import SummaryWriter
+import matplotlib.cm as cm
 
 
 class Trainer():
@@ -25,7 +26,7 @@ class Trainer():
 
     def train(self):
         writer = SummaryWriter(logdir=self.log_dir)
-        writer.add_text("config", self.cfg.pretty())
+        writer.add_text("conf", self.cfg.pretty())
         device = "cuda:0"
         wu_cfg = self.cfg.fe.trainer
         model = UNet2D(self.cfg.fe.n_raw_channels, self.cfg.fe.n_embedding_features, final_sigmoid=False, num_levels=5)
@@ -39,7 +40,7 @@ class Trainer():
         dset = SpgDset(self.cfg.gen.data_dir, wu_cfg.patch_manager, wu_cfg.patch_stride, wu_cfg.patch_shape, wu_cfg.reorder_sp)
         dloader = DataLoader(dset, batch_size=wu_cfg.batch_size, shuffle=True, pin_memory=True,
                              num_workers=0)
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.fe.lr)
         sheduler = ReduceLROnPlateau(optimizer,
                                      patience=100,
                                      threshold=1e-3,
@@ -124,7 +125,7 @@ class Trainer():
         return
 
 
-@hydra.main(config_path="/g/kreshuk/hilt/projects/unsup_pix_embed/config")
+@hydra.main(config_path="/g/kreshuk/hilt/projects/unsup_pix_embed/conf")
 def main(cfg):
     tr = Trainer(cfg)
     tr.train()
