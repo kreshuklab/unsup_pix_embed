@@ -1,0 +1,11 @@
+gen:
+  target_dir: dbg # dir name in base-dir. Logs are in here
+  base_dir: /g/kreshuk/hilt/projects/RLForSeg # base-dir
+  data_dir_raw_train: /g/kreshuk/hilt/projects/data/toy_lines_ovals #/g/kreshuk/hilt/projects/data/leptin_fused_tp1_ch_0/train # /g/kreshuk/kaziakhm/circles_s025_gs0035_ps04_alln_lines
+#  data_dir_affs: /g/kreshuk/hilt/projects/data/leptin_fused_tp1_ch_0/train/affinities_1
+  data_dir_raw_val: /g/kreshuk/hilt/projects/data/toy_lines_ovals/val #/g/kreshuk/hilt/projects/data/leptin_fused_tp1_ch_0/val # /g/kreshuk/kaziakhm/circles_s025_gs0035_ps04_alln_lines
+  p: 2 # p norm in embedding space
+  model_name: "embeddings_projector.pth"
+  val_chunk_size: 40
+  train_chunk_size: 40
+
