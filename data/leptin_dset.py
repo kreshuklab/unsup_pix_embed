@@ -54,20 +54,9 @@ class LeptinDset(torch_data.Dataset):
         raw /= raw.max()
         affinities = torch.sigmoid(torch.from_numpy(affinity_file["predictions"][:]).squeeze(1))
 
-        affinities[:self.sep_chnl] *= -1
-        affinities[:self.sep_chnl] += +1
-        affinities = np.clip(affinities, 0, 1)
+        mask = wtsd[None] == torch.unique(wtsd)[:, None, None]
+        wtsd = (mask * (torch.arange(len(torch.unique(wtsd)), device=wtsd.device)[:, None, None] + 1)).sum(0) - 1
 
-        all = torch.cat([raw[None], wtsd[None], affinities], 0).float()
-        patch = self.pm.get_patch(all, patch_idx)
-
-        raw = patch[0].unsqueeze(0)
-        _wtsd = patch[1]
-        wtsd = torch.zeros_like(_wtsd)[None]
-        for i, sp in enumerate(torch.unique(_wtsd)):
-            wtsd[_wtsd[None] == sp] = i
-        affinities = patch[2:]
-
-        return raw, wtsd.long(), affinities, torch.tensor([img_idx, patch_idx])
+        return raw[None].float(), wtsd.long(), affinities, torch.tensor([img_idx, patch_idx])
 
 

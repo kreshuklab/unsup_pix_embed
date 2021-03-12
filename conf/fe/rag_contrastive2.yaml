@@ -7,7 +7,7 @@ backbone:
   out_channels: 16
   # use Groupnorm instead of Batchnorm for DSB; Batchnorm introduces artifacts around nuclei due to the difference
   # in intensity distribution between images with large and small cells
-  layer_order: bcr
+  layer_order: gcr
   num_groups: 8
   f_maps: [32, 64, 128, 256]
   #conv_padding: 0

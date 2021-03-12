@@ -17,7 +17,7 @@ class SpgDset(torch_data.Dataset):
                  spatial_augmentation=False,
                  intensity_augmentation=False,
                  noise_augmentation=False,
-                 patched_output=True):
+                 patched_output=False):
         """ dataset for loading images (raw, gt, superpixel segs) and according rags"""
         self.graph_dir = os.path.join(root_dir, 'graph_data')
         self.pix_dir = os.path.join(root_dir, 'pix_data')

@@ -71,7 +71,7 @@ class RagContrastiveWeights(nn.Module):
         # return the average norm per batch
         return torch.sum(norms, dim=1).div(C)
 
-    def forward(self, embeddings, sp_seg, edges, weights, chunks=4):
+    def forward(self, embeddings, sp_seg, edges, weights, chunks=1):
         # expecting first two args as N, C, D, H, W and third as 2, L. First should be l2-normalized w.r.t. C
         loss = torch.tensor([0.0], device=embeddings.device)
 

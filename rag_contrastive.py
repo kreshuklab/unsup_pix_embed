@@ -2,7 +2,7 @@ import matplotlib
 # matplotlib.use('Agg')
 import hydra
 import os
-from data.spg_dset_no_inp_patch import SpgDset
+from data.spg_dset import SpgDset
 import torch
 from torch.utils.data import DataLoader
 from unet3d.model import UNet2D
@@ -11,11 +11,13 @@ import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from losses.RagContrastive_loss import RagContrastive, RagContrastiveWeights
 from losses.contrastive_loss import ContrastiveLoss
+from losses.contrastive_loss_with_edgeweights import ContrastiveWeights
 from tensorboardX import SummaryWriter
 from patch_manager import StridedPatches2D, NoPatches2D
 from elf.segmentation.features import compute_rag
 from data.leptin_dset import LeptinDset
 import numpy as np
+from yaml_conv_parser import YamlConf
 import matplotlib.cm as cm
 
 
@@ -36,10 +38,8 @@ class Trainer():
         wu_cfg = self.cfg.fe.trainer
         model = UNet2D(**self.cfg.fe.backbone)
         model.cuda(device)
-        train_set = SpgDset(self.cfg.gen.data_dir_raw_train,
-                            intensity_augmentation=False,
-                            noise_augmentation=False)
-        val_set = SpgDset(self.cfg.gen.data_dir_raw_val, patched_output=False)
+        train_set = SpgDset(self.cfg.gen.data_dir_raw_train, reorder_sp=False)
+        val_set = SpgDset(self.cfg.gen.data_dir_raw_val, reorder_sp=False)
         # pm = StridedPatches2D(wu_cfg.patch_stride, wu_cfg.patch_shape, train_set.image_shape)
         pm = NoPatches2D()
         train_set.length = len(train_set.graph_file_names) * np.prod(pm.n_patch_per_dim)
@@ -52,41 +52,31 @@ class Trainer():
                              num_workers=0)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.fe.lr)
         sheduler = ReduceLROnPlateau(optimizer,
-                                     patience=7,
+                                     patience=80,
                                      threshold=1e-4,
                                      min_lr=1e-8,
                                      factor=0.1)
-        # criterion = RagContrastiveWeights(delta_var=0.1, delta_dist=0.4)
-        criterion = ContrastiveLoss(delta_var=0.5, delta_dist=1.5)
+        # criterion = ContrastiveWeights(delta_var=0.1, delta_dist=0.3)
+        criterion = RagContrastiveWeights(delta_var=0.1, delta_dist=0.3)
+        # criterion = ContrastiveLoss(delta_var=0.1, delta_dist=0.3)
         acc_loss = 0
         valit = 0
         iteration = 0
         best_loss = np.inf
 
         while iteration <= wu_cfg.n_iterations:
-            for it, (raw, gt, sp_seg, affinities, indices) in enumerate(train_loader):
-                patch_idx = indices.squeeze(0)[0] % np.prod(pm.n_patch_per_dim)
+            for it, (raw, gt, sp_seg, affinities, offs, indices) in enumerate(train_loader):
                 raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device).squeeze(1), affinities.to(device)
-                loss_embeds = model(raw.unsqueeze(2)).squeeze(2)
+                offs = offs.numpy().tolist()
+                loss_embeds = model(raw[:, :, None]).squeeze(2)
 
 
-                # all_p = pm.get_patch(torch.cat([raw.squeeze(0), gt.squeeze(0), sp_seg.squeeze(0), embeddings.squeeze(0), affinities.squeeze(0)], 0).to(device), patch_idx)
-                # raw, gt, sp_seg, loss_embeds, affinities = all_p[0][None].detach(), all_p[1][None].detach(), all_p[2][None].detach(), all_p[3:3+self.cfg.fe.backbone.out_channels][None], all_p[3+self.cfg.fe.backbone.out_channels:][None].detach()
-                # relabel to consecutive ints starting at 0
-                # unique = torch.unique(sp_seg)
-                # mask = sp_seg == unique[:, None, None]
-                # sp_seg = (mask * (torch.arange(len(unique), device=sp_seg.device)[:, None, None] + 1)).sum(0) - 1
-                # unique = torch.unique(gt)
-                # mask = gt == unique[:, None, None]
-                # gt = (mask * (torch.arange(len(unique), device=gt.device)[:, None, None] + 1)).sum(0) - 1
-
-                # edge_feat, edges = get_edge_features_1d(sp_seg.squeeze().cpu().numpy(), [[0, -1], [-1, 0], [-5, 0], [0, -5]], affinities.squeeze().cpu().numpy())
-                # edges = torch.from_numpy(edges.astype(np.long)).to(device).T
-                # edge_weights = torch.from_numpy(edge_feat.astype(np.float)).to(device)[:, 0][None]
-                edges, edge_weights = None, None
+                edge_feat, edges = tuple(zip(*[get_edge_features_1d(seg.squeeze().cpu().numpy(), os, affs.squeeze().cpu().numpy()) for seg, os, affs in zip(sp_seg, offs, affinities)]))
+                edges = [torch.from_numpy(e.astype(np.long)).to(device).T for e in edges]
+                edge_weights = [torch.from_numpy(ew.astype(np.float32)).to(device)[:, 0][None] for ew in edge_feat]
 
                 # put embeddings on unit sphere so we can use cosine distance
-                # loss_embeds = loss_embeds / torch.norm(loss_embeds, dim=1, keepdim=True)
+                loss_embeds = loss_embeds / (torch.norm(loss_embeds, dim=1, keepdim=True) + 1e-9)
 
                 loss = criterion(loss_embeds, sp_seg[:, None].long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
 
@@ -99,56 +89,55 @@ class Trainer():
                 writer.add_scalar("fe_train/loss", loss.item(), iteration)
                 if (iteration) % 100 == 0:
                     with torch.set_grad_enabled(False):
-                        for it, (raw, gt, sp_seg, affinities, indices) in enumerate(val_loader):
-                            inp, sp_seg, affinities = raw.to(device), sp_seg.to(device).squeeze(1), affinities.to(device)
+                        for it, (raw, gt, sp_seg, affinities, offs, indices) in enumerate(val_loader):
+                            raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device).squeeze(1), affinities.to(device)
+                            offs = offs.numpy().tolist()
+                            embeddings = model(raw[:, :, None]).squeeze(2)
 
-                            # unique = torch.unique(sp_seg)
-                            # mask = sp_seg.squeeze(0) == unique[:, None, None]
-                            # sp_seg = (mask * (torch.arange(len(unique), device=sp_seg.device)[:, None, None] + 1)).sum(0) - 1
-                            # unique = torch.unique(gt)
-                            # mask = gt.squeeze(0) == unique[:, None, None]
-                            # gt = (mask * (torch.arange(len(unique), device=gt.device)[:, None, None] + 1)).sum(0) - 1
+                            # relabel to consecutive ints starting at 0
+                            edge_feat, edges = tuple(zip(
+                                *[get_edge_features_1d(seg.squeeze().cpu().numpy(), os, affs.squeeze().cpu().numpy())
+                                  for seg, os, affs in zip(sp_seg, offs, affinities)]))
+                            edges = [torch.from_numpy(e.astype(np.long)).to(device).T for e in edges]
+                            edge_weights = [torch.from_numpy(ew.astype(np.float32)).to(device)[:, 0][None] for ew in edge_feat]
 
-                            # edge_feat, edges = get_edge_features_1d(sp_seg.squeeze().cpu().numpy(), [[0, -1], [-1, 0], [-5, 0], [0, -5]],
-                            #                                         affinities.squeeze().cpu().numpy())
-                            # edges = torch.from_numpy(edges.astype(np.long)).to(device).T
-                            # edge_weights = torch.from_numpy(edge_feat.astype(np.float)).to(device)[:, 0][None]
-                            edges, edge_weights = None, None
+                            # put embeddings on unit sphere so we can use cosine distance
+                            embeddings = embeddings / (torch.norm(embeddings, dim=1, keepdim=True) + 1e-9)
 
-                            embeddings = model(inp.unsqueeze(2)).squeeze(2)
-                            # embeddings = embeddings / torch.norm(embeddings, dim=1, keepdim=True)
-                            ls = criterion(embeddings, sp_seg[:, None].long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.val_chunk_size)).item()
+                            ls = criterion(embeddings, sp_seg[:, None].long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
                             # ls = 0
                             acc_loss += ls
                             writer.add_scalar("fe_val/loss", ls, valit)
                             valit += 1
                     acc_loss = acc_loss / len(val_loader)
                     if acc_loss < best_loss:
+                        print(self.save_dir)
                         torch.save(model.state_dict(), os.path.join(self.save_dir, "best_val_model.pth"))
                         best_loss = acc_loss
                     sheduler.step(acc_loss)
                     acc_loss = 0
-                    fig, (a1, a2, a3) = plt.subplots(1, 3, sharex='col', sharey='row',
-                                                 gridspec_kw={'hspace': 0, 'wspace': 0})
-                    a1.imshow(inp[0].cpu().permute(1, 2, 0).squeeze())
+                    fig, ((a1, a2), (a3, a4)) = plt.subplots(2, 2, sharex='col', sharey='row', gridspec_kw={'hspace': 0, 'wspace': 0})
+                    a1.imshow(raw[0].cpu().permute(1, 2, 0).squeeze())
                     a1.set_title('raw')
                     a2.imshow(cm.prism(sp_seg[0].cpu().squeeze() / sp_seg[0].cpu().squeeze().max()))
                     a2.set_title('sp')
-                    # a3.imshow(pca_project(get_angles(embeddings)[0].detach().cpu()))
-                    a3.imshow(pca_project(embeddings[0].detach().cpu()))
-                    a3.set_title('embed')
-                    plt.show()
-                    # writer.add_figure("examples", fig, iteration//100)
+                    a3.imshow(pca_project(get_angles(embeddings)[0].detach().cpu()))
+                    a3.set_title('angle_embed')
+                    a4.imshow(pca_project(embeddings[0].detach().cpu()))
+                    a4.set_title('embed')
+                    # plt.show()
+                    writer.add_figure("examples", fig, iteration//100)
                 iteration += 1
+                print(iteration)
                 if iteration > wu_cfg.n_iterations:
+                    print(self.save_dir)
                     torch.save(model.state_dict(), os.path.join(self.save_dir, "last_model.pth"))
                     break
         return
 
 
-@hydra.main(config_path="/g/kreshuk/hilt/projects/unsup_pix_embed/conf")
-def main(cfg):
-    tr = Trainer(cfg)
+def main():
+    tr = Trainer(YamlConf("conf").cfg)
     tr.train()
 
 if __name__ == '__main__':

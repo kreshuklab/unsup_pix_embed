@@ -25,8 +25,12 @@ class SpgDset(torch_data.Dataset):
         self.graph_file_names = sorted(glob(os.path.join(self.graph_dir, "*.h5")))
         self.pix_file_names = sorted(glob(os.path.join(self.pix_dir, "*.h5")))
         self.reorder_sp = reorder_sp
-        self.augm_tf = RndAugmentationTfs(patch_shape, n_chnl_for_intensity=1)
+        self.intensity_augmentation = intensity_augmentation
+        if intensity_augmentation:
+            self.augm_tf = RndAugmentationTfs(patch_shape, n_chnl_for_intensity=1)
         self.spatial_augmentation = spatial_augmentation
+        if spatial_augmentation:
+            self.spatial_augmentation = spatial_augmentation
         self.intensity_augmentation = intensity_augmentation
         self.noise_augmentation = noise_augmentation
         pix_file = h5py.File(self.pix_file_names[0], 'r')
@@ -76,36 +80,41 @@ class SpgDset(torch_data.Dataset):
             raw = torch.from_numpy(raw.astype(np.float)).permute(2, 0, 1).float()
         raw -= raw.min()
         raw /= raw.max()
+        nc = raw.shape[0]
         gt = torch.from_numpy(pix_file["gt"][:].astype(np.long)).unsqueeze(0).float()
         sp_seg = torch.from_numpy(graph_file["node_labeling"][:].astype(np.long)).unsqueeze(0).float()
+        affs = torch.from_numpy(graph_file["affinities"][:].astype(np.float)).float()
+        offs = torch.from_numpy(graph_file["offsets"][:]).long()
 
         augm_or_not = torch.randint(0, 3, (3,))
-        all = torch.cat([raw, gt, sp_seg], 0)
-        spat_tf, int_tf = self.augm_tf.sample(1, 1)
+        all = torch.cat([raw, gt, sp_seg, affs], 0)
         patch = self.pm.get_patch(all, patch_idx)
         if augm_or_not[0] == 0 and self.spatial_augmentation:
+            spat_tf, int_tf = self.augm_tf.sample(1, 1)
             patch = spat_tf(patch)
 
         if not self.reorder_sp:
-            return patch[:-2], patch[-2].unsqueeze(0), patch[-1].unsqueeze(0), torch.tensor([img_idx, patch_idx])
+            return patch[:nc], patch[nc:nc+1], patch[nc+1:nc+2], patch[nc+2:], offs, torch.tensor([img_idx, patch_idx])
 
-        sp_seg = patch[-1].unsqueeze(0)
-        gt = patch[-2].unsqueeze(0)
+        gt = patch[nc:nc+1]
+        sp_seg = patch[nc+1:nc+2]
 
-        augm_raw = self.norm_tf(patch[:-2])
+        augm_raw = patch[:nc]
         if augm_or_not[1] == 0 and self.intensity_augmentation:
+            spat_tf, int_tf = self.augm_tf.sample(1, 1)
             augm_raw = int_tf(augm_raw)
         if augm_or_not[2] == 0 and self.noise_augmentation:
             augm_raw = add_sp_gauss_noise(augm_raw, 0.2, 0.1, 0.3)
 
         # relabel to consecutive ints starting at 0
-        mask = sp_seg[None] == torch.unique(sp_seg)[:, None, None]
-        sp_seg = (mask * (torch.arange(len(torch.unique(sp_seg)), device=sp_seg.device)[:, None, None] + 1)).sum(0) - 1
+        un = torch.unique(sp_seg)
+        mask = sp_seg == un[:, None, None]
+        sp_seg = (mask * (torch.arange(len(un), device=sp_seg.device)[:, None, None] + 1)).sum(0) - 1
+        un = torch.unique(gt)
+        mask = gt == un[:, None, None]
+        gt = (mask * (torch.arange(len(un), device=gt.device)[:, None, None] + 1)).sum(0) - 1
 
-        mask = gt[None] == torch.unique(gt)[:, None, None]
-        gt = (mask * (torch.arange(len(torch.unique(gt)), device=gt.device)[:, None, None] + 1)).sum(0) - 1
-
-        return augm_raw, gt, sp_seg, torch.tensor([img_idx, patch_idx])
+        return augm_raw, gt, sp_seg, patch[nc+2:], offs, torch.tensor([img_idx, patch_idx])
 
 
     def get_graphs(self, indices, patches, device="cpu"):
