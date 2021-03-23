@@ -106,7 +106,7 @@ class RagContrastiveWeights(nn.Module):
         masked_embeddings = mask * s_embeddings[None]
         sp_means = masked_embeddings.transpose(0, 1).flatten(2).sum(2) / n_pix_per_sp[None]
 
-        sp_means = sp_means / torch.clamp(torch.norm(sp_means, dim=0, keepdim=True), min=1e-10)
+        sp_means = sp_means / (torch.norm(sp_means, dim=0, keepdim=True) + 1e-10)
 
         intra_sp_dist = self.distance(sp_means[..., None, None], masked_embeddings.transpose(0, 1), dim=0, kd=False)
         intra_sp_dist = torch.clamp(intra_sp_dist - self.delta_var, min=0) / n_pix_per_sp[..., None, None]

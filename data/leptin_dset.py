@@ -60,3 +60,42 @@ class LeptinDset(torch_data.Dataset):
         return raw[None].float(), wtsd.long(), affinities, torch.tensor([img_idx, patch_idx])
 
 
+class LeptinValDset(torch_data.Dataset):
+    def __init__(self, file):
+        self.file = file
+        self.length = 10
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        raw_file = h5py.File(self.file, 'r')
+
+        raw = torch.from_numpy(raw_file["raw"][:].astype(np.float))
+        gt = torch.from_numpy(raw_file["gt"][:].astype(np.float))
+        raw -= raw.min()
+        raw /= raw.max()
+
+        mask = gt[None] == torch.unique(gt)[:, None, None]
+        gt = (mask * (torch.arange(len(torch.unique(gt)), device=gt.device)[:, None, None] + 1)).sum(0) - 1
+        raw_file.close()
+        return raw[None].float(), gt.long()
+
+
+if __name__=="__main__":
+    slc_dict = {0: "4", 1: "43", 2: "97", 3: "125", 4: "165", 5: "201", 6: "230", 7: "239", 8: "291", 9: "308"}
+    gt_file = h5py.File("/g/kreshuk/kaziakhm/plant_seg/processed_gt.h5", 'r')
+    gts = torch.from_numpy(gt_file["label"][:].astype(np.long))
+    raws = torch.from_numpy(gt_file["raw"][:].astype(np.long))
+    write_dir = "/g/kreshuk/hilt/projects/data/leptin_fused_tp1_ch_0/true_val/raw_gt"
+    for i in range(10):
+        gt = gts[i]
+        slc = slc_dict[i]
+
+        # mask = gt[None] == torch.unique(gt)[:, None, None]
+        # gt = (mask * (torch.arange(len(torch.unique(gt)), device=gt.device)[:, None, None] + 1)).sum(0) - 1
+
+        pix_file = h5py.File(os.path.join(write_dir, "slice_" + slc + ".h5"), 'a')
+        pix_file.create_dataset(name="label", data=gt)
+        pix_file.create_dataset(name="raw", data=raws[i])
+        pix_file.close()

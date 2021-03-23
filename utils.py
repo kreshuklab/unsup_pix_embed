@@ -9,6 +9,14 @@ from sklearn.decomposition import PCA
 from scipy.cluster.vq import kmeans2, whiten, kmeans
 import elf.segmentation.features as feats
 
+def get_contour_from_2d_binary(mask: torch.Tensor):
+    """
+    :param mask: n_dim should be three (N|H|W). can be bool or long but should be binary if long.
+    :return: tensor of the same shape and type bool containing all inner contours of objects in mask
+    """
+    max_p = torch.nn.MaxPool2d(3, stride=1, padding=1)
+    return ((max_p(mask) != mask) | (-max_p(-mask) != mask)).long()
+
 def get_valid_edges(shape, offsets):
     # compute valid edges
     ndim = len(offsets[0])

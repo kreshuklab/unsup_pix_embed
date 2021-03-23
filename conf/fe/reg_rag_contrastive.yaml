@@ -1,6 +1,7 @@
 # feature extractor
 run: 2
 model_name: 'embedding_unet'
+embeddings_separator: 10
 backbone:
   name: UNet2D
   in_channels: 2
@@ -14,7 +15,7 @@ backbone:
   final_sigmoid: false
   is_segmentation: false
 load_pretrained: false
-lr: 0.001
+lr: 0.0001
 
 trainer:
   n_iterations: 60000  # number of total iterations

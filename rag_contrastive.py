@@ -6,7 +6,7 @@ from data.spg_dset import SpgDset
 import torch
 from torch.utils.data import DataLoader
 from unet3d.model import UNet2D
-from utils import soft_update_params, pca_project, get_angles, set_seed_everywhere, get_edge_features_1d
+from utils import soft_update_params, pca_project, get_angles, set_seed_everywhere, get_edge_features_1d, get_contour_from_2d_binary
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from losses.RagContrastive_loss import RagContrastive, RagContrastiveWeights
@@ -19,6 +19,8 @@ from data.leptin_dset import LeptinDset
 import numpy as np
 from yaml_conv_parser import YamlConf
 import matplotlib.cm as cm
+from pt_gaussfilter import GaussianSmoothing
+import torch.nn.functional as F
 
 
 class Trainer():
@@ -50,15 +52,14 @@ class Trainer():
                              num_workers=0)
         val_loader = DataLoader(val_set, batch_size=wu_cfg.batch_size, shuffle=True, pin_memory=True,
                              num_workers=0)
+        gauss_kernel = GaussianSmoothing(1, 5, 3, device=device)
         optimizer = torch.optim.Adam(model.parameters(), lr=self.cfg.fe.lr)
         sheduler = ReduceLROnPlateau(optimizer,
-                                     patience=80,
+                                     patience=40,
                                      threshold=1e-4,
-                                     min_lr=1e-8,
+                                     min_lr=1e-5,
                                      factor=0.1)
-        # criterion = ContrastiveWeights(delta_var=0.1, delta_dist=0.3)
         criterion = RagContrastiveWeights(delta_var=0.1, delta_dist=0.3)
-        # criterion = ContrastiveLoss(delta_var=0.1, delta_dist=0.3)
         acc_loss = 0
         valit = 0
         iteration = 0
@@ -66,10 +67,14 @@ class Trainer():
 
         while iteration <= wu_cfg.n_iterations:
             for it, (raw, gt, sp_seg, affinities, offs, indices) in enumerate(train_loader):
-                raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device).squeeze(1), affinities.to(device)
-                offs = offs.numpy().tolist()
-                loss_embeds = model(raw[:, :, None]).squeeze(2)
+                raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device), affinities.to(device)
 
+                edge_img = F.pad(get_contour_from_2d_binary(sp_seg), (2, 2, 2, 2), mode='constant')
+                edge_img = gauss_kernel(edge_img.float())
+                input = torch.cat([raw, edge_img], dim=1)
+
+                offs = offs.numpy().tolist()
+                loss_embeds = model(input[:, :, None]).squeeze(2)
 
                 edge_feat, edges = tuple(zip(*[get_edge_features_1d(seg.squeeze().cpu().numpy(), os, affs.squeeze().cpu().numpy()) for seg, os, affs in zip(sp_seg, offs, affinities)]))
                 edges = [torch.from_numpy(e.astype(np.long)).to(device).T for e in edges]
@@ -78,7 +83,7 @@ class Trainer():
                 # put embeddings on unit sphere so we can use cosine distance
                 loss_embeds = loss_embeds / (torch.norm(loss_embeds, dim=1, keepdim=True) + 1e-9)
 
-                loss = criterion(loss_embeds, sp_seg[:, None].long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
+                loss = criterion(loss_embeds, sp_seg.long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -90,9 +95,13 @@ class Trainer():
                 if (iteration) % 100 == 0:
                     with torch.set_grad_enabled(False):
                         for it, (raw, gt, sp_seg, affinities, offs, indices) in enumerate(val_loader):
-                            raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device).squeeze(1), affinities.to(device)
+                            raw, gt, sp_seg, affinities = raw.to(device), gt.to(device), sp_seg.to(device), affinities.to(device)
+                            edge_img = F.pad(get_contour_from_2d_binary(sp_seg), (2, 2, 2, 2), mode='constant')
+                            edge_img = gauss_kernel(edge_img.float())
+                            input = torch.cat([raw, edge_img], dim=1)
+
                             offs = offs.numpy().tolist()
-                            embeddings = model(raw[:, :, None]).squeeze(2)
+                            embeddings = model(input[:, :, None]).squeeze(2)
 
                             # relabel to consecutive ints starting at 0
                             edge_feat, edges = tuple(zip(
@@ -104,7 +113,7 @@ class Trainer():
                             # put embeddings on unit sphere so we can use cosine distance
                             embeddings = embeddings / (torch.norm(embeddings, dim=1, keepdim=True) + 1e-9)
 
-                            ls = criterion(embeddings, sp_seg[:, None].long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
+                            ls = criterion(embeddings, sp_seg.long(), edges, edge_weights, chunks=int(sp_seg.max().item()//self.cfg.gen.train_chunk_size))
                             # ls = 0
                             acc_loss += ls
                             writer.add_scalar("fe_val/loss", ls, valit)
@@ -119,7 +128,7 @@ class Trainer():
                     fig, ((a1, a2), (a3, a4)) = plt.subplots(2, 2, sharex='col', sharey='row', gridspec_kw={'hspace': 0, 'wspace': 0})
                     a1.imshow(raw[0].cpu().permute(1, 2, 0).squeeze())
                     a1.set_title('raw')
-                    a2.imshow(cm.prism(sp_seg[0].cpu().squeeze() / sp_seg[0].cpu().squeeze().max()))
+                    a2.imshow(cm.prism(sp_seg[0, 0].cpu().squeeze() / sp_seg[0, 0].cpu().squeeze().max()))
                     a2.set_title('sp')
                     a3.imshow(pca_project(get_angles(embeddings)[0].detach().cpu()))
                     a3.set_title('angle_embed')

@@ -73,11 +73,11 @@ class SpgDset(torch_data.Dataset):
         pix_file = h5py.File(self.pix_file_names[img_idx], 'r')
         graph_file = h5py.File(self.graph_file_names[img_idx], 'r')
 
-        raw = pix_file["raw"][:]
+        raw = pix_file["raw_2chnl"][:][0]
         if raw.ndim == 2:
             raw = torch.from_numpy(raw.astype(np.float)).float().unsqueeze(0)
         else:
-            raw = torch.from_numpy(raw.astype(np.float)).permute(2, 0, 1).float()
+            raw = torch.from_numpy(raw.astype(np.float)).float()
         raw -= raw.min()
         raw /= raw.max()
         nc = raw.shape[0]
@@ -114,7 +114,7 @@ class SpgDset(torch_data.Dataset):
         mask = gt == un[:, None, None]
         gt = (mask * (torch.arange(len(un), device=gt.device)[:, None, None] + 1)).sum(0) - 1
 
-        return augm_raw, gt, sp_seg, patch[nc+2:], offs, torch.tensor([img_idx, patch_idx])
+        return augm_raw, gt.float()[None], sp_seg.float()[None], patch[nc+2:], offs, torch.tensor([img_idx, patch_idx])
 
 
     def get_graphs(self, indices, patches, device="cpu"):

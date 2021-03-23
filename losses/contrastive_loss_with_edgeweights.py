@@ -145,8 +145,9 @@ class ContrastiveWeights(nn.Module):
         cm_matrix2 = cm_matrix1.permute(0, 2, 1, 3)
         # compute pair-wise distances (NxCxC)
         dist_matrix = self.dist(cm_matrix1, cm_matrix2, dim=3, kd=False)
-        dist_matrix[:, eid[0], eid[1]] = dist_matrix[:, eid[0], eid[1]] * ew
-        dist_matrix[:, eid[1], eid[0]] = dist_matrix[:, eid[1], eid[0]] * ew
+        if ew is not None:
+            dist_matrix[:, eid[0], eid[1]] = dist_matrix[:, eid[0], eid[1]] * ew
+            dist_matrix[:, eid[1], eid[0]] = dist_matrix[:, eid[1], eid[0]] * ew
 
         # create matrix for the repulsion distance (i.e. cluster centers further apart than 2 * delta_dist
         # are not longer repulsed)
@@ -169,7 +170,7 @@ class ContrastiveWeights(nn.Module):
         # return the average norm per batch
         return torch.sum(norms, dim=1).div(C)
 
-    def forward(self, input_, target, edge_ids, weights, *args, **kwargs):
+    def forward(self, input_, target, edge_ids=None, weights=None, *args, **kwargs):
         """
         Args:
              input_ (torch.tensor): embeddings predicted by the network (NxExDxHxW) (E - embedding dims)
@@ -185,8 +186,14 @@ class ContrastiveWeights(nn.Module):
         # compute the loss per each instance in the batch separately
         # and sum it up in the per_instance variable
         per_instance_loss = 0.
-        for single_input, single_target, eid, ew in zip(input_, target, edge_ids, weights):
+        for idx, (single_input, single_target), eid, ew in enumerate(zip(input_, target)):
             # add singleton batch dimension required for further computation
+            if weights is None:
+                ew = None
+                eid = None
+            else:
+                ew = weights[idx]
+                eid = edge_ids[idx]
             single_input = single_input.unsqueeze(0)
             single_target = single_target.unsqueeze(0)
 

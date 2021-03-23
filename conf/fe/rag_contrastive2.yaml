@@ -3,7 +3,7 @@ run: 2
 model_name: 'embedding_unet'
 backbone:
   name: UNet2D
-  in_channels: 1
+  in_channels: 5
   out_channels: 16
   # use Groupnorm instead of Batchnorm for DSB; Batchnorm introduces artifacts around nuclei due to the difference
   # in intensity distribution between images with large and small cells
@@ -14,7 +14,7 @@ backbone:
   final_sigmoid: false
   is_segmentation: false
 load_pretrained: false
-lr: 0.0001
+lr: 0.001
 
 trainer:
   n_iterations: 60000  # number of total iterations
