@@ -17,6 +17,6 @@ load_pretrained: false
 lr: 0.001
 
 trainer:
-  n_iterations: 60000  # number of total iterations
+  n_iterations: 200  # number of total iterations
   batch_size: 1  # batch size for feature extractor warmup
 

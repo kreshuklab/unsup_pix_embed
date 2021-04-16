@@ -73,13 +73,13 @@ class SpgDset(torch_data.Dataset):
         pix_file = h5py.File(self.pix_file_names[img_idx], 'r')
         graph_file = h5py.File(self.graph_file_names[img_idx], 'r')
 
-        raw = pix_file["raw_2chnl"][:][0]
+        raw = pix_file["raw_2chnl"][:]
         if raw.ndim == 2:
             raw = torch.from_numpy(raw.astype(np.float)).float().unsqueeze(0)
         else:
             raw = torch.from_numpy(raw.astype(np.float)).float()
-        raw -= raw.min()
-        raw /= raw.max()
+        # raw -= raw.min()
+        # raw /= raw.max()
         nc = raw.shape[0]
         gt = torch.from_numpy(pix_file["gt"][:].astype(np.long)).unsqueeze(0).float()
         sp_seg = torch.from_numpy(graph_file["node_labeling"][:].astype(np.long)).unsqueeze(0).float()
